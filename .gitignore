@@ -1,0 +1,6 @@
+*.csv
+*.xlsx
+*.png
+desktop.ini
+ingest.py
+memory/
