@@ -70,7 +70,7 @@
 <body>
 <header>
   <h1>AI Usage Dashboard</h1>
-  <span class="ts">Last updated: May 10, 2026 at 01:45 PM</span>
+  <span class="ts">Last updated: May 10, 2026 at 01:50 PM</span>
 </header>
 <div class="main">
 
@@ -305,24 +305,39 @@ if (C.topUsers.length) {
 
   if (!dauSeries.length && !userSnaps.length) return;
 
-  let html="";
-
-  // ── DAU time-series ──
+  // ── Pre-compute all data before touching the DOM ──
+  let dauRows=[], dauLabels=[];
   if (dauSeries.length) {
-    // Merge all rows from all DAU series (in case multiple files)
-    const allRows = [];
+    const allRows=[];
     dauSeries.forEach(s=>allRows.push(...s.rows));
     allRows.sort((a,b)=>a.date.localeCompare(b.date));
-    // dedupe by date, keep last
     const rowMap={};
     allRows.forEach(r=>rowMap[r.date]=r);
-    const rows=Object.values(rowMap).sort((a,b)=>a.date.localeCompare(b.date));
-
-    const dauLabels=rows.map(r=>{
+    dauRows=Object.values(rowMap).sort((a,b)=>a.date.localeCompare(b.date));
+    dauLabels=dauRows.map(r=>{
       const d=new Date(r.date+"T00:00:00");
       return d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
     });
+  }
 
+  let snap,topUsers,uEmails,appTotals,nonzeroApps,top12,t12emails,stackDatasets;
+  if (userSnaps.length) {
+    snap=userSnaps[userSnaps.length-1];
+    topUsers=snap.users.filter(u=>u.overall>0).slice(0,20);
+    uEmails=topUsers.map(u=>u.email.split("@")[0]);
+    appTotals=snap.app_totals;
+    nonzeroApps=apps.filter(a=>appTotals[a]>0);
+    top12=topUsers.slice(0,12);
+    t12emails=top12.map(u=>u.email.split("@")[0]);
+    stackDatasets=nonzeroApps.map(app=>{
+      return {label:app,data:top12.map(u=>u.apps[app]||0),
+              backgroundColor:(appColors[app]||COL[0])+"cc",borderRadius:2};
+    });
+  }
+
+  // ── Build all HTML at once, set innerHTML exactly once ──
+  let html="";
+  if (dauSeries.length) {
     html+=`<h2>Daily Active Users</h2>
     <div class="panel">
       <div class="panel-title">Daily Active Users + Adoption Rate (% of Eligible)</div>
@@ -338,56 +353,8 @@ if (C.topUsers.length) {
         <div style="position:relative;height:220px"><canvas id="gAdoptLine"></canvas></div>
       </div>
     </div>`;
-
-    container.innerHTML = html;
-
-    // DAU line
-    const dauEl = document.getElementById("gDauLine");
-    new Chart(dauEl, {
-      type:"line",
-      data:{
-        labels:dauLabels,
-        datasets:[
-          { label:"Daily Active Users", data:rows.map(r=>r.dau),
-             borderColor:COL[0], backgroundColor:COL[0]+"22",
-             fill:true, tension:.3, pointRadius:3, yAxisID:"y" },
-          { label:"Eligible Users", data:rows.map(r=>r.eligible),
-             borderColor:COL[9], backgroundColor:"transparent",
-             borderDash:[5,4], tension:.3, pointRadius:0, yAxisID:"y" },
-        ]
-      },
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        plugins:{legend:{position:"top"}, tooltip:{mode:"index",intersect:false}},
-        scales:{
-          x:{grid:{display:false}},
-          y:{beginAtZero:true, ticks:{stepSize:10}},
-        },
-      },
-    });
-
-    // DAU bar
-    mkBar("gDauBar", dauLabels, [
-      { label:"DAU", data:rows.map(r=>r.dau), backgroundColor:COL[0]+"bb", borderRadius:2 },
-    ], { plugins:{legend:{display:false}}, scales:{x:{ticks:{maxRotation:45},grid:{display:false}}, y:{beginAtZero:true} } });
-
-    // Adoption % line
-    mkLine("gAdoptLine", dauLabels, [
-      { label:"Adoption %", data:rows.map(r=>r.eligible?+(r.dau/r.eligible*100).toFixed(1):0),
-         borderColor:COL[4], backgroundColor:COL[4]+"22", fill:true, tension:.3, pointRadius:3 },
-    ], { scales:{ y:{beginAtZero:true, ticks:{callback:v=>v+"%"} } } });
   }
-
-  // ── Per-user data ──
   if (userSnaps.length) {
-    const snap = userSnaps[userSnaps.length-1];
-    const topUsers = snap.users.filter(u=>u.overall>0).slice(0,20);
-    const uEmails  = topUsers.map(u=>u.email.split("@")[0]);
-
-    // App totals aggregated
-    const appTotals = snap.app_totals;
-    const nonzeroApps = apps.filter(a=>appTotals[a]>0);
-
     html+=`<h2>Per-User Usage</h2>
     <div class="panel">
       <div class="panel-title">Top Users — Overall Interactions (${snap.label})</div>
@@ -402,58 +369,9 @@ if (C.topUsers.length) {
         <div class="panel-title">Top Users — Stacked by App</div>
         <div style="position:relative;height:280px"><canvas id="gAppStack"></canvas></div>
       </div>
-    </div>`;
-
-    container.innerHTML = html;
-
-    // Re-render DAU charts now that DOM updated
-    // (they were lost when we set innerHTML again — re-trigger after all html is set)
-
-    // user bar
-    mkBar("gUserBar", uEmails, [{
-      label:"Overall Interactions",
-      data:topUsers.map(u=>u.overall),
-      backgroundColor:COL[0]+"cc", borderRadius:4,
-    }], { plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true} } });
-
-    // app pie
-    const pieEl = document.getElementById("gAppPie");
-    new Chart(pieEl, {
-      type:"doughnut",
-      data:{
-        labels:nonzeroApps,
-        datasets:[{ data:nonzeroApps.map(a=>appTotals[a]),
-          backgroundColor:nonzeroApps.map(a=>appColors[a]||COL[0]),
-          borderWidth:2, borderColor:"#fff" }]
-      },
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        plugins:{
-          legend:{position:"right",labels:{boxWidth:12,font:{size:12}}},
-          tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${fmt(ctx.raw)}`} },
-        },
-      },
-    });
-
-    // stacked app bar (top 12 users)
-    const top12 = topUsers.slice(0,12);
-    const t12emails = top12.map(u=>u.email.split("@")[0]);
-    const stackDatasets = nonzeroApps.map(app=>{
-      const color = appColors[app]||COL[0];
-      return {
-        label:app,
-        data:top12.map(u=>u.apps[app]||0),
-        backgroundColor:color+"cc", borderRadius:2,
-      };
-    });
-    mkBar("gAppStack", t12emails, stackDatasets, {
-      scales:{ x:{stacked:true, grid:{display:false}}, y:{stacked:true, beginAtZero:true} },
-    });
-
-    // leaderboard table
-    const tblHtml = `<h2>Leaderboard</h2>
-    <div class="panel"><div style="overflow-x:auto">
-    <table id="gLeaderboard">
+    </div>
+    <h2>Leaderboard</h2>
+    <div class="panel"><div style="overflow-x:auto"><table id="gLeaderboard">
       <thead><tr><th>#</th><th>User</th><th>Total</th><th>Active Days</th>`+
       nonzeroApps.map(a=>`<th>${a}</th>`).join("")+
       `</tr></thead><tbody>`+
@@ -461,36 +379,54 @@ if (C.topUsers.length) {
         `<tr><td class="dim">${i+1}</td><td class="mono">${u.email}</td>
          <td>${fmt(u.overall)}</td><td>${u.active_days}</td>`+
         nonzeroApps.map(a=>`<td>${u.apps[a]>0?fmt(u.apps[a]):""}</td>`).join("")+
-        `</tr>`
-      ).join("")+`</tbody></table></div></div>`;
-
-    container.innerHTML += tblHtml;
+        `</tr>`).join("")+
+      `</tbody></table></div></div>`;
   }
+  container.innerHTML = html;
 
-  // Re-run DAU chart setup if both sections rendered
-  if (dauSeries.length && userSnaps.length) {
-    const allRows=[];
-    dauSeries.forEach(s=>allRows.push(...s.rows));
-    allRows.sort((a,b)=>a.date.localeCompare(b.date));
-    const rowMap={};
-    allRows.forEach(r=>rowMap[r.date]=r);
-    const rows=Object.values(rowMap).sort((a,b)=>a.date.localeCompare(b.date));
-    const dauLabels=rows.map(r=>{
-      const d=new Date(r.date+"T00:00:00");
-      return d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
+  // ── Render all charts now that DOM is stable ──
+  if (dauSeries.length) {
+    new Chart(document.getElementById("gDauLine"),{
+      type:"line",
+      data:{labels:dauLabels,datasets:[
+        {label:"Daily Active Users",data:dauRows.map(r=>r.dau),
+          borderColor:COL[0],backgroundColor:COL[0]+"22",fill:true,tension:.3,pointRadius:3,yAxisID:"y"},
+        {label:"Eligible Users",data:dauRows.map(r=>r.eligible),
+          borderColor:COL[9],backgroundColor:"transparent",borderDash:[5,4],tension:.3,pointRadius:0,yAxisID:"y"},
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{position:"top"},tooltip:{mode:"index",intersect:false}},
+        scales:{x:{grid:{display:false}},y:{beginAtZero:true,ticks:{stepSize:10}}}},
     });
-
-    if (document.getElementById("gDauLine"))
-      new Chart(document.getElementById("gDauLine"),{type:"line",data:{labels:dauLabels,datasets:[
-        {label:"Daily Active Users",data:rows.map(r=>r.dau),borderColor:COL[0],backgroundColor:COL[0]+"22",fill:true,tension:.3,pointRadius:3,yAxisID:"y"},
-        {label:"Eligible Users",data:rows.map(r=>r.eligible),borderColor:COL[9],backgroundColor:"transparent",borderDash:[5,4],tension:.3,pointRadius:0,yAxisID:"y"},
-      ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"top"},tooltip:{mode:"index",intersect:false}},scales:{x:{grid:{display:false}},y:{beginAtZero:true}}}});
-
-    if (document.getElementById("gDauBar"))
-      mkBar("gDauBar",dauLabels,[{label:"DAU",data:rows.map(r=>r.dau),backgroundColor:COL[0]+"bb",borderRadius:2}],{plugins:{legend:{display:false}},scales:{x:{ticks:{maxRotation:45},grid:{display:false}},y:{beginAtZero:true}}});
-
-    if (document.getElementById("gAdoptLine"))
-      mkLine("gAdoptLine",dauLabels,[{label:"Adoption %",data:rows.map(r=>r.eligible?+(r.dau/r.eligible*100).toFixed(1):0),borderColor:COL[4],backgroundColor:COL[4]+"22",fill:true,tension:.3,pointRadius:3}],{scales:{y:{beginAtZero:true,ticks:{callback:v=>v+"%"}}}});
+    mkBar("gDauBar",dauLabels,[
+      {label:"DAU",data:dauRows.map(r=>r.dau),backgroundColor:COL[0]+"bb",borderRadius:2},
+    ],{plugins:{legend:{display:false}},scales:{x:{ticks:{maxRotation:45},grid:{display:false}},y:{beginAtZero:true}}});
+    mkLine("gAdoptLine",dauLabels,[
+      {label:"Adoption %",data:dauRows.map(r=>r.eligible?+(r.dau/r.eligible*100).toFixed(1):0),
+        borderColor:COL[4],backgroundColor:COL[4]+"22",fill:true,tension:.3,pointRadius:3},
+    ],{scales:{y:{beginAtZero:true,ticks:{callback:v=>v+"%"}}}});
+  }
+  if (userSnaps.length) {
+    mkBar("gUserBar",uEmails,[{
+      label:"Overall Interactions",data:topUsers.map(u=>u.overall),
+      backgroundColor:COL[0]+"cc",borderRadius:4,
+    }],{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}});
+    new Chart(document.getElementById("gAppPie"),{
+      type:"doughnut",
+      data:{labels:nonzeroApps,datasets:[{
+        data:nonzeroApps.map(a=>appTotals[a]),
+        backgroundColor:nonzeroApps.map(a=>appColors[a]||COL[0]),
+        borderWidth:2,borderColor:"#fff",
+      }]},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{
+          legend:{position:"right",labels:{boxWidth:12,font:{size:12}}},
+          tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${fmt(ctx.raw)}`}},
+        }},
+    });
+    mkBar("gAppStack",t12emails,stackDatasets,{
+      scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,beginAtZero:true}},
+    });
   }
 })();
 </script>
